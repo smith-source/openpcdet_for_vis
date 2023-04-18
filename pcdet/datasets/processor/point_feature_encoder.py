@@ -26,7 +26,7 @@ class PointFeatureEncoder(object):
                 use_lead_xyz: whether to use xyz as point-wise features
                 ...
         """
-        data_dict['points'], use_lead_xyz = getattr(self, self.point_encoding_config.encoding_type)(
+        data_dict['points'], use_lead_xyz = getattr(self, self.point_encoding_config.encoding_type)(   # # encoding_type: absolute_coordinates_encoding
             data_dict['points']
         )
         data_dict['use_lead_xyz'] = use_lead_xyz

@@ -4,9 +4,11 @@ import pickle
 import numpy as np
 from skimage import io
 
-from ...ops.roiaware_pool3d import roiaware_pool3d_utils
-from ...utils import box_utils, calibration_kitti, common_utils, object3d_kitti
-from ..dataset import DatasetTemplate
+# from ...ops.roiaware_pool3d import roiaware_pool3d_utils
+from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
+from pcdet.utils import box_utils, calibration_kitti, common_utils, object3d_kitti
+from pcdet.datasets.dataset import DatasetTemplate
+import math
 
 
 class KittiDataset(DatasetTemplate):
@@ -31,6 +33,18 @@ class KittiDataset(DatasetTemplate):
         self.kitti_infos = []
         self.include_kitti_data(self.mode)
 
+        cur_cls_infos = {}      # @
+        self.shelter_resampling_config = self.dataset_cfg.DATA_AUGMENTOR.SHELTER_RESAMPLING
+        balanced_resampling_gamma = self.dataset_cfg.get('BALANCED_RESAMPLING_GRAMMA', None)
+        if self.training and balanced_resampling_gamma is not None:
+            self.kitti_infos, cur_cls_infos = self.balanced_infos_resampling(self.kitti_infos, gamma=balanced_resampling_gamma)
+            kitti_infos_len = len(self.kitti_infos)
+
+        if cur_cls_infos and self.shelter_resampling_config['IS_USE']:
+            self.kitti_infos, _ = self.shelter_resampling(cur_cls_infos, self.shelter_resampling_config)
+            kitti_infos_len_res = len(self.kitti_infos)
+            self.logger.info('Add {} frames after shelter resampling'.format(kitti_infos_len_res - kitti_infos_len))
+
     def include_kitti_data(self, mode):
         if self.logger is not None:
             self.logger.info('Loading KITTI dataset')
@@ -48,6 +62,109 @@ class KittiDataset(DatasetTemplate):
 
         if self.logger is not None:
             self.logger.info('Total samples for KITTI dataset: %d' % (len(kitti_infos)))
+
+    def balanced_infos_resampling(self, infos, gamma=1):
+        if self.class_names is None:
+            return infos
+        cls_infos = {name: [] for name in self.class_names}
+        for info in infos:
+            for name in set(info['annos']['name']):
+                if name in self.class_names:
+                    cls_infos[name].append(info)
+        duplicated_samples = sum([len(v) for _, v in cls_infos.items()])
+        cls_dist = {k: len(v) / duplicated_samples for k, v in cls_infos.items()}
+        sampled_infos = []
+        cur_cls_infos = {}
+        frac = 1.0 / len(self.class_names)
+        ratios = [(frac / v) ** gamma for v in cls_dist.values()]
+        for cur_cls, ratio in zip(list(cls_infos.keys()), ratios):
+            cur_cls_infos[cur_cls] = cls_infos[cur_cls]
+            cur_cls_infos_num = len(cur_cls_infos[cur_cls])
+            if ratio >= 1:
+                sampled_infos += cur_cls_infos[cur_cls]
+                num_sample = int(cur_cls_infos_num * ratio) - cur_cls_infos_num
+                cls_total_frames = cur_cls_infos_num + num_sample
+            else:
+                num_sample = int(cur_cls_infos_num * ratio)
+                cls_total_frames = num_sample
+            sampled_infos += np.random.choice(cur_cls_infos[cur_cls], num_sample).tolist()
+            self.logger.info(
+                'Class {}: {} in {} frames which contain instances of the category of the categoy are samoled'.format(
+                    cur_cls, cls_total_frames, cur_cls_infos_num
+                ))
+        self.logger.info('Total samples sfter balanced resampling: %s' % (len(sampled_infos)))
+        return sampled_infos, cur_cls_infos
+
+    def shelter_resampling(self, cur_cls_infos, config):
+
+        min_poitns_in_box = {'Car': 20, 'Pedestrian': 10, 'Cyclist': 10, 'DontCare': -2,
+                             'Van': -2, 'Tram': -2, 'Truck': -2, 'Misc': -2}           # # 框内最小的点数，小于这个点数则筛选出来
+
+        def check_shelter(gt_box, config, point_cloud_range):
+            is_shelter = 0
+            [x, y] = gt_box[:2]
+            if point_cloud_range[0] < x < point_cloud_range[3] and point_cloud_range[1] < y < point_cloud_range[4]:
+                angle_a = gt_box[6]
+                angle_a_sin = abs(math.sin(angle_a))
+                angle_b = math.atan2(y, x)
+                angle_b_sin = abs(math.sin(angle_b))
+                alpha_range = config['SAMPLE_RANGE']
+                # # range_min, range_max  = alpha_range[0], alpha_range[1]
+                if abs(angle_a_sin - angle_b_sin) <= alpha_range:
+                    is_shelter = 1
+            else:
+                is_shelter = 0
+            return is_shelter
+
+        hirain_infos_temp = []
+        config_gramma = config["GRAMMA"]
+        cur_cls = [i for i in cur_cls_infos.keys()]
+        add_res = {i: 0 for i in cur_cls}
+        # # path = "/data_local/data_nas/pad3d_out/vehicle_port/sasa_hesai_5classes_shelter/shelter.pickle"
+
+        for k in cur_cls:
+            infos = cur_cls_infos[k]
+            len_infos = len(infos)
+            # #infos_temp = copy.deepcopy(infos)
+            infos_temp = pickle.loads(pickle.dumps(infos))
+            for dex, info in enumerate(infos):
+                is_shelter_total = False
+                index = np.where(info['annos']['name'] == k)
+
+
+                for v in info['annos']['gt_boxes_lidar'][index]:
+                    is_shelter = check_shelter(v, config, self.dataset_cfg.POINT_CLOUD_RANGE)
+                    # min_points = []
+                    # is_less_points = False
+                    if is_shelter:
+                        is_shelter_total = True
+
+                    #     for (c, n) in zip(info['annos']['name'], info['annos']['num_points_in_gt']):
+                    #         if n < min_poitns_in_box[c]:
+                    #             is_less_points = True
+                    #             min_points.append({c:n})
+                    #
+                    # # # *** 记录shelter场景、且点数小于特定值的idx *** # #
+                    # if is_less_points and is_shelter_total:
+                    #     with open('/home/smith/my_projects/data/shelter.txt', 'a') as f:
+                    #         f.write(info['point_cloud']['lidar_idx'])
+                    #         f.write('\t')
+                    #         f.write(str(min_points))
+                    #         f.write('\n')
+
+
+                if is_shelter_total:
+                    add_info = [info for i in range(int(config_gramma[k]))]
+                    infos_temp = infos_temp[:dex + 1] + add_info + infos_temp[dex + 1:]
+
+            len_infos_res = len(infos_temp) - len_infos
+            add_res[k] = len_infos_res
+            self.logger.info('{} add {} frames after shelter resampling'.format(k, add_res[k]))
+            hirain_infos_temp += infos_temp
+
+        return hirain_infos_temp, add_res
+
+
 
     def set_split(self, split):
         super().__init__(
@@ -297,6 +414,7 @@ class KittiDataset(DatasetTemplate):
         annos = []
         for index, box_dict in enumerate(pred_dicts):
             frame_id = batch_dict['frame_id'][index]
+            # box_dict.cpu()
 
             single_pred_dict = generate_single_sample_dict(index, box_dict)
             single_pred_dict['frame_id'] = frame_id
@@ -342,7 +460,8 @@ class KittiDataset(DatasetTemplate):
         if self._merge_all_iters_to_one_epoch:
             index = index % len(self.kitti_infos)
 
-        info = copy.deepcopy(self.kitti_infos[index])
+        # info = copy.deepcopy(self.kitti_infos[index])   # # maybe lead to too low speed
+        info = pickle.loads(pickle.dumps(self.kitti_infos[index]))
 
         sample_idx = info['point_cloud']['lidar_idx']
 
@@ -432,8 +551,9 @@ if __name__ == '__main__':
         import yaml
         from pathlib import Path
         from easydict import EasyDict
-        dataset_cfg = EasyDict(yaml.load(open(sys.argv[2])))
-        ROOT_DIR = (Path(__file__).resolve().parent / '../../../').resolve()
+        dataset_cfg = EasyDict(yaml.full_load(open(sys.argv[2])))
+        # ROOT_DIR = (Path(__file__).resolve().parent / '../../../').resolve()   # #
+        ROOT_DIR = Path('/home/smith/my_projects')
         create_kitti_infos(
             dataset_cfg=dataset_cfg,
             class_names=['Car', 'Pedestrian', 'Cyclist'],

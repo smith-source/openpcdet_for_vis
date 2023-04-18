@@ -1,5 +1,6 @@
 DATASET: 'KittiDataset'
-DATA_PATH: '../data/kitti'
+#DATA_PATH: '../data/kitti'
+DATA_PATH: '/home/smith/my_projects/data/kitti'
 
 POINT_CLOUD_RANGE: [0, -40, -3, 70.4, 40, 1]
 
@@ -13,7 +14,7 @@ INFO_PATH: {
     'test': [kitti_infos_val.pkl],
 }
 
-FOV_POINTS_ONLY: True
+FOV_POINTS_ONLY: False
 
 
 DATA_AUGMENTOR:
@@ -46,6 +47,12 @@ DATA_AUGMENTOR:
           ENABLE_PROB: 0.5
           WORLD_SCALE_RANGE: [0.95, 1.05]
 
+    SHELTER_RESAMPLING:
+        IS_USE: False
+        SAMPLE_RANGE: 0.008
+        GRAMMA: {'Pedestrian':3, 'Car':3, 'Headstock':6, 'Emptytrailer':6, 'FullTrailer':3, 'Cyclist':3}
+
+
 
 POINT_FEATURE_ENCODING: {
     encoding_type: absolute_coordinates_encoding,
@@ -64,10 +71,12 @@ DATA_PROCESSOR:
         'test': False
       }
 
-    - NAME: transform_points_to_voxels
-      VOXEL_SIZE: [0.05, 0.05, 0.1]
-      MAX_POINTS_PER_VOXEL: 5
-      MAX_NUMBER_OF_VOXELS: {
-        'train': 16000,
-        'test': 40000
-      }
+#    - NAME: transform_points_to_voxels
+#      VOXEL_SIZE: [0.05, 0.05, 0.1]
+#      MAX_POINTS_PER_VOXEL: 5
+#      MAX_NUMBER_OF_VOXELS: {
+#        'train': 16000,
+#        'test': 40000
+      
+
+BALANCED_RESAMPLING_GRAMMA: 1.0

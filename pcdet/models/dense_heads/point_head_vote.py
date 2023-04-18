@@ -69,11 +69,11 @@ class PointHeadVote(PointHeadTemplate):
         )
         self.reg_layers = self.make_fc_layers(
             input_channels=channel_in,
-            output_channels=self.box_coder.code_size,
+            output_channels=self.box_coder.code_size,      # # 6 + 2 * angle_bin_num
             fc_list=self.model_cfg.REG_FC
         )
 
-        self.init_weights(weight_init='xavier')
+        self.init_weights(weight_init='xavier')      # # 是否可以使用别的初始化方法？？？
 
     def init_weights(self, weight_init='xavier'):
         if weight_init == 'kaiming':
@@ -178,6 +178,7 @@ class PointHeadVote(PointHeadTemplate):
         assert not set_ignore_flag or extend_gt_boxes is not None
         batch_size = gt_boxes.shape[0]
         bs_idx = points[:, 0]
+
         point_cls_labels = points.new_zeros(points.shape[0]).long()
         point_reg_labels = gt_boxes.new_zeros((points.shape[0], 3))
         for k in range(batch_size):
@@ -205,9 +206,10 @@ class PointHeadVote(PointHeadTemplate):
             point_reg_labels_single[box_fg_flag] = gt_box_of_fg_points[:, 0:3]
             point_reg_labels[bs_mask] = point_reg_labels_single
 
+
         targets_dict = {
             'point_cls_labels': point_cls_labels,
-            'point_reg_labels': point_reg_labels,
+            'point_reg_labels': point_reg_labels
         }
         return targets_dict
 
@@ -253,6 +255,16 @@ class PointHeadVote(PointHeadTemplate):
             point_reg_labels: (N1 + N2 + N3 + ..., code_size)
             point_box_labels: (N1 + N2 + N3 + ..., 7)
         """
+        """ 
+        points为预测的点，gt_boxes为真值
+        此函数的在作用就是返回与预测点points对应的3个真值，
+         targets_dict = {
+            'point_cls_labels': point_cls_labels,
+            'point_reg_labels': point_reg_labels,
+            'point_box_labels': point_box_labels
+        }
+        """
+        list(points)
         assert len(points.shape) == 2 and points.shape[1] == 4, 'points.shape=%s' % str(points.shape)
         assert len(gt_boxes.shape) == 3, 'gt_boxes.shape=%s' % str(gt_boxes.shape)
         assert extend_gt_boxes is None or len(extend_gt_boxes.shape) == 3, \
@@ -278,16 +290,18 @@ class PointHeadVote(PointHeadTemplate):
                 fg_flag = box_fg_flag
                 ignore_flag = fg_flag ^ (extend_box_idxs_of_pts >= 0)
                 point_cls_labels_single[ignore_flag] = -1
-            elif use_ball_constraint:
+            elif use_ball_constraint:                   # # 使用球限制
                 box_centers = gt_boxes[k][box_idxs_of_pts][:, 0:3].clone()
                 ball_flag = ((box_centers - points_single).norm(dim=1) < central_radius)
-                fg_flag = box_fg_flag & ball_flag
+                fg_flag = box_fg_flag & ball_flag       # # candidate point 在框内 或 与中心距离不超过central_radius
                 ignore_flag = fg_flag ^ box_fg_flag
                 point_cls_labels_single[ignore_flag] = -1
             else:
                 raise NotImplementedError
 
-            gt_box_of_fg_points = gt_boxes[k][box_idxs_of_pts[fg_flag]]
+            gt_box_of_fg_points = gt_boxes[k][box_idxs_of_pts[fg_flag]]   # # fg_flag 对应的gt_boxes
+
+
             point_cls_labels_single[fg_flag] = 1 if self.num_class == 1 else gt_box_of_fg_points[:, -1].long()
             point_cls_labels[bs_mask] = point_cls_labels_single
 
@@ -307,7 +321,7 @@ class PointHeadVote(PointHeadTemplate):
         targets_dict = {
             'point_cls_labels': point_cls_labels,
             'point_reg_labels': point_reg_labels,
-            'point_box_labels': point_box_labels
+            'point_box_labels': point_box_labels,
         }
         return targets_dict
 
@@ -557,7 +571,7 @@ class PointHeadVote(PointHeadTemplate):
         })
         return point_loss_cls, cls_weights, tb_dict  # point_loss_cls: (N)
 
-    def get_box_layer_loss(self, tb_dict=None):
+    def get_box_layer_loss(self, tb_dict=None):                                        # # from line 793
         pos_mask = self.forward_ret_dict['point_cls_labels'] > 0
         point_reg_preds = self.forward_ret_dict['point_reg_preds']
         point_reg_labels = self.forward_ret_dict['point_reg_labels']
@@ -584,12 +598,12 @@ class PointHeadVote(PointHeadTemplate):
             point_loss_velo_reg = point_loss_velo_reg.sum(dim=-1).squeeze()
             point_loss_offset_reg = point_loss_offset_reg + point_loss_velo_reg
 
-        point_loss_offset_reg *= loss_weights_dict['point_offset_reg_weight']
+        point_loss_offset_reg *= loss_weights_dict['point_offset_reg_weight']              # # point_loss_offset_reg
 
         if isinstance(self.box_coder, box_coder_utils.PointBinResidualCoder):
             point_angle_cls_labels = \
                 point_reg_labels[:, 6:6 + self.box_coder.angle_bin_num]
-            point_loss_angle_cls = F.cross_entropy(  # angle bin cls
+            point_loss_angle_cls = F.cross_entropy(  # angle bin cls                       # # point_loss_angle_cls
                 point_reg_preds[:, 6:6 + self.box_coder.angle_bin_num],
                 point_angle_cls_labels.argmax(dim=-1), reduction='none') * reg_weights
 
@@ -597,7 +611,7 @@ class PointHeadVote(PointHeadTemplate):
             point_angle_reg_labels = point_reg_labels[:, 6 + self.box_coder.angle_bin_num:6 + 2 * self.box_coder.angle_bin_num]
             point_angle_reg_preds = (point_angle_reg_preds * point_angle_cls_labels).sum(dim=-1, keepdim=True)
             point_angle_reg_labels = (point_angle_reg_labels * point_angle_cls_labels).sum(dim=-1, keepdim=True)
-            point_loss_angle_reg = self.reg_loss_func(
+            point_loss_angle_reg = self.reg_loss_func(                                     # # point_loss_angle_reg
                 point_angle_reg_preds[None, ...],
                 point_angle_reg_labels[None, ...],
                 weights=reg_weights[None, ...]
@@ -633,7 +647,7 @@ class PointHeadVote(PointHeadTemplate):
                 point_loss_box_aux = point_loss_box_aux + point_loss_iou
 
             if self.model_cfg.LOSS_CONFIG.get('CORNER_LOSS_REGULARIZATION', False):
-                point_loss_corner = self.get_corner_loss_lidar(
+                point_loss_corner = self.get_corner_loss_lidar(                            # # point_loss_corner
                     point_box_preds[pos_mask, 0:7],
                     point_box_labels[pos_mask, 0:7]
                 )
@@ -663,15 +677,123 @@ class PointHeadVote(PointHeadTemplate):
         else:
             return None, None
 
+
+    def generate_sa_center_ness_mask(self,point_base, point_box_labels, pos_mask, epsilon=1e-6):
+
+
+
+        sa_centerness_mask = []
+        for i in range(len(pos_mask)):
+
+            pos_mask = pos_mask[i] > 0
+            
+
+
+            point_box_labels = point_box_labels[i]
+
+            point_base = point_base[i].view(-1, point_base[i].shape[-1])[:,1:]
+            
+            
+            centerness = point_box_labels.new_zeros(pos_mask.shape)
+
+            point_box_labels = point_box_labels[pos_mask, :]
+
+            
+            canonical_xyz = point_base[pos_mask, :] - point_box_labels[:, :3]
+            rys = point_box_labels[:, -1]
+            canonical_xyz = common_utils.rotate_points_along_z(
+                canonical_xyz.unsqueeze(dim=1), -rys
+            ).squeeze(dim=1)
+
+            distance_front = point_box_labels[:, 3] / 2 - canonical_xyz[:, 0]
+            distance_back = point_box_labels[:, 3] / 2 + canonical_xyz[:, 0]
+            distance_left = point_box_labels[:, 4] / 2 - canonical_xyz[:, 1]
+            distance_right = point_box_labels[:, 4] / 2 + canonical_xyz[:, 1]
+            distance_top = point_box_labels[:, 5] / 2 - canonical_xyz[:, 2]
+            distance_bottom = point_box_labels[:, 5] / 2 + canonical_xyz[:, 2]
+
+            centerness_l = torch.min(distance_front, distance_back) / torch.max(distance_front, distance_back)
+            centerness_w = torch.min(distance_left, distance_right) / torch.max(distance_left, distance_right)
+            centerness_h = torch.min(distance_top, distance_bottom) / torch.max(distance_top, distance_bottom)
+            centerness_pos = torch.clamp(centerness_l * centerness_w * centerness_h, min=epsilon) ** (1 / 3.0)
+
+            centerness[pos_mask] = centerness_pos
+
+            sa_centerness_mask.append(centerness)
+        return sa_centerness_mask
+
+    def get_sasa_layer_loss_centerness(self, tb_dict=None):
+
+        sa_ins_labels = self.forward_ret_dict['point_sasa_labels']
+        sa_ins_preds = self.forward_ret_dict['point_sasa_preds']
+        sa_pos_mask = self.forward_ret_dict['point_sasa_labels']
+        sa_gt_boxes = self.forward_ret_dict['sa_gt_box_of_fg_points']
+        sa_xyz_coords = self.forward_ret_dict['sa_xyz_coords']
+        sa_centerness_mask = self.generate_sa_center_ness_mask(sa_xyz_coords, sa_gt_boxes, sa_pos_mask)
+
+
+        sa_ins_loss, ignore = 0, 0
+        for i in range(len(sa_ins_labels)):  # valid when i =1, 2
+            if len(sa_ins_preds[i]) != 0:
+                try:
+                    point_cls_preds = sa_ins_preds[i][..., 1:].view(-1, self.num_class)
+                except:
+                    point_cls_preds = sa_ins_preds[i][..., 1:].view(-1, 1)
+
+            else:
+                ignore += 1
+                continue
+            point_cls_labels = sa_ins_labels[i].view(-1)
+            positives = (point_cls_labels > 0)
+            negative_cls_weights = (point_cls_labels == 0) * 1.0
+            cls_weights = (negative_cls_weights + 1.0 * positives).float()
+            pos_normalizer = positives.sum(dim=0).float()
+            cls_weights /= torch.clamp(pos_normalizer, min=1.0)
+
+            one_hot_targets = point_cls_preds.new_zeros(*list(point_cls_labels.shape),
+                                                        self.num_class + 1)  # # 为什么多加了这一句???
+            one_hot_targets.scatter_(-1, (point_cls_labels * (point_cls_labels >= 0).long()).unsqueeze(dim=-1).long(),
+                                     1.0)
+            one_hot_targets = one_hot_targets[..., 1:]
+
+            if ('ctr' in self.model_cfg.LOSS_CONFIG.SAMPLE_METHOD_LIST[i + 1][0]):
+                centerness_mask = sa_centerness_mask[i]
+                one_hot_targets = one_hot_targets * centerness_mask.unsqueeze(-1).repeat(1, one_hot_targets.shape[1])
+
+            point_loss_ins = self.ins_loss_func(point_cls_preds, one_hot_targets, weights=cls_weights).mean(
+                dim=-1).sum()
+            loss_weights_dict = self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS
+            point_loss_ins = point_loss_ins * loss_weights_dict.get('ins_aware_weight', [1] * len(sa_ins_labels))[i]
+
+            sa_ins_loss += point_loss_ins
+            if tb_dict is None:
+                tb_dict = {}
+            tb_dict.update({
+                'sa%s_loss_ins' % str(i): point_loss_ins.item(),
+                'sa%s_pos_num' % str(i): pos_normalizer.item()
+            })
+
+        sa_ins_loss = sa_ins_loss / (len(sa_ins_labels) - ignore)
+        tb_dict.update({
+            'sa_loss_ins': sa_ins_loss.item(),
+        })
+        return sa_ins_loss, tb_dict
+
+
+
+
+
+
+
     def get_loss(self, tb_dict=None):
         tb_dict = {} if tb_dict is None else tb_dict
-        point_loss_vote, tb_dict_0 = self.get_vote_layer_loss()
+        point_loss_vote, tb_dict_0 = self.get_vote_layer_loss()   # # candidate points loss  # # loss_vote
 
         point_loss_cls, cls_weights, tb_dict_1 = self.get_cls_layer_loss()
         point_loss_box, box_weights, tb_dict_2 = self.get_box_layer_loss()
 
-        point_loss_cls = point_loss_cls.sum() / torch.clamp(cls_weights.sum(), min=1.0)
-        point_loss_box = point_loss_box.sum() / torch.clamp(box_weights.sum(), min=1.0)
+        point_loss_cls = point_loss_cls.sum() / torch.clamp(cls_weights.sum(), min=1.0)   # # loss_cls  # # add centerness
+        point_loss_box = point_loss_box.sum() / torch.clamp(box_weights.sum(), min=1.0)   # # loss_box
         tb_dict.update({
             'point_loss_vote': point_loss_vote.item(),
             'point_loss_cls': point_loss_cls.item(),
@@ -683,11 +805,189 @@ class PointHeadVote(PointHeadTemplate):
         tb_dict.update(tb_dict_1)
         tb_dict.update(tb_dict_2)
 
-        point_loss_sasa, tb_dict_3 = self.get_sasa_layer_loss()
+        point_loss_sasa, tb_dict_3 = self.get_sasa_layer_loss()                          # # loss_sasa   to add centerness
         if point_loss_sasa is not None:
             tb_dict.update(tb_dict_3)
             point_loss += point_loss_sasa
         return point_loss, tb_dict
+
+
+
+    def assign_sa_targets_simple(self, points,gt_boxes, extend_gt_boxes=None, use_query_assign=False,
+                          ret_box_labels=False, ret_offset_labels=True,
+                          set_ignore_flag=True, use_ball_constraint=False, central_radii=2.0,
+                          fg_pc_ignore=False, use_ex_gt_assign=False,binary_label=False, central_radius=2.0
+                          ):   # @
+        """
+        targets_dict = self.assign_sa_targets(batch_dict['point_coords_list'],  # @   to add
+                                                  batch_dict['gt_boxes'],)
+        """
+        assert len(points.shape) == 2 and points.shape[1] == 4, 'points.shape=%s' % str(points.shape)
+        assert len(gt_boxes.shape) == 3 and gt_boxes.shape[2] == 8, 'gt_boxes.shape=%s' % str(gt_boxes.shape)
+        assert extend_gt_boxes is None or len(extend_gt_boxes.shape) == 3 and extend_gt_boxes.shape[2] == 8, \
+            'extend_gt_boxes.shape=%s' % str(extend_gt_boxes.shape)
+
+        batch_size = gt_boxes.shape[0]
+        bs_idx = points[:, 0]
+        point_cls_labels = points.new_zeros(points.shape[0]).long()
+        gt_boxes_of_fg_points = []
+        box_idxs_labels = points.new_zeros(points.shape[0]).long()
+        gt_box_of_points = gt_boxes.new_zeros((points.shape[0], 8))
+
+        point_box_labels = gt_boxes.new_zeros((points.shape[0], 8)) if ret_box_labels else None
+
+        for k in range(batch_size):
+            bs_mask = (bs_idx == k)
+            points_single = points[bs_mask][:, 1:4]
+            point_cls_labels_single = point_cls_labels.new_zeros(bs_mask.sum())
+            box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(                  # # the size of box_idxs_of_pts? i think is (points_single) ???
+                points_single.unsqueeze(dim=0), gt_boxes[k:k + 1, :, 0:7].contiguous()
+            ).long().squeeze(dim=0)
+
+
+            box_fg_flag = (box_idxs_of_pts >= 0)
+
+            if use_query_assign:  ##
+                centers = gt_boxes[k:k + 1, :, 0:3]
+                query_idxs_of_pts = roiaware_pool3d_utils.points_in_ball_query_gpu(
+                    points_single.unsqueeze(dim=0), centers.contiguous(), central_radii
+                ).long().squeeze(dim=0)
+                query_fg_flag = (query_idxs_of_pts >= 0)
+                if fg_pc_ignore:
+                    fg_flag = query_fg_flag ^ box_fg_flag
+                    extend_box_idxs_of_pts[box_idxs_of_pts != -1] = -1
+                    box_idxs_of_pts = extend_box_idxs_of_pts
+                else:
+                    fg_flag = query_fg_flag
+                    box_idxs_of_pts = query_idxs_of_pts
+            elif use_ex_gt_assign:  ##
+                extend_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
+                    points_single.unsqueeze(dim=0), extend_gt_boxes[k:k + 1, :, 0:7].contiguous()
+                ).long().squeeze(dim=0)
+                extend_fg_flag = (extend_box_idxs_of_pts >= 0)
+
+                extend_box_idxs_of_pts[box_fg_flag] = box_idxs_of_pts[
+                    box_fg_flag]  # instance points should keep unchanged
+
+                if fg_pc_ignore:
+                    fg_flag = extend_fg_flag ^ box_fg_flag
+                    extend_box_idxs_of_pts[box_idxs_of_pts != -1] = -1
+                    box_idxs_of_pts = extend_box_idxs_of_pts
+                else:
+                    fg_flag = extend_fg_flag
+                    box_idxs_of_pts = extend_box_idxs_of_pts
+
+            elif set_ignore_flag:
+                extend_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
+                    points_single.unsqueeze(dim=0), extend_gt_boxes[k:k + 1, :, 0:7].contiguous()
+                ).long().squeeze(dim=0)
+                fg_flag = box_fg_flag
+                ignore_flag = fg_flag ^ (extend_box_idxs_of_pts >= 0)
+                point_cls_labels_single[ignore_flag] = -1
+
+            elif use_ball_constraint:
+                box_centers = gt_boxes[k][box_idxs_of_pts][:, 0:3].clone()
+                box_centers[:, 2] += gt_boxes[k][box_idxs_of_pts][:, 5] / 2
+                ball_flag = ((box_centers - points_single).norm(dim=1) < central_radius)
+                fg_flag = box_fg_flag & ball_flag
+
+            else:
+                raise NotImplementedError
+
+            gt_box_of_fg_points = gt_boxes[k][box_idxs_of_pts[fg_flag]]
+            point_cls_labels_single[fg_flag] = 1 if self.num_class == 1 or binary_label else gt_box_of_fg_points[:, -1].long()
+            point_cls_labels[bs_mask] = point_cls_labels_single
+
+            bg_flag = (point_cls_labels_single == 0)  # except ignore_id
+            # box_bg_flag
+            fg_flag = fg_flag ^ (fg_flag & bg_flag)  # # ???
+            gt_box_of_fg_points = gt_boxes[k][box_idxs_of_pts[fg_flag]]
+
+    
+
+            gt_boxes_of_fg_points.append(gt_box_of_fg_points)
+            box_idxs_labels[bs_mask] = box_idxs_of_pts
+            gt_box_of_points[bs_mask] = gt_boxes[k][box_idxs_of_pts]
+
+            if ret_box_labels and gt_box_of_fg_points.shape[0] > 0:
+                point_box_labels_single = point_box_labels.new_zeros((bs_mask.sum(), 8))
+                fg_point_box_labels = self.box_coder.encode_torch(
+                    gt_boxes=gt_box_of_fg_points[:, :-1], points=points_single[fg_flag],
+                    gt_classes=gt_box_of_fg_points[:, -1].long()
+                )
+                point_box_labels_single[fg_flag] = fg_point_box_labels
+                point_box_labels[bs_mask] = point_box_labels_single
+
+
+        gt_boxes_of_fg_points = torch.cat(gt_boxes_of_fg_points, dim=0)
+        targets_dict = {
+            'point_cls_labels': point_cls_labels,
+            'point_box_labels': point_box_labels,
+            'gt_box_of_fg_points': gt_boxes_of_fg_points,
+            'box_idxs_labels': box_idxs_labels,
+            'gt_box_of_points': gt_box_of_points,
+        }
+
+        return targets_dict
+
+    def assign_sa_targets(self, input_dict):
+
+        gt_boxes = input_dict['gt_boxes']
+        sa_ins_preds_len = len(input_dict['point_scores_list'])
+
+        batch_size = input_dict['batch_size']
+        targets_dict_center = {}
+
+        sa_ins_labels, sa_gt_box_of_fg_points, sa_xyz_coords, sa_gt_box_of_points, sa_box_idxs_labels = [], [], [], [], []
+        for i in range(1, sa_ins_preds_len):  # valid when i = 1,2 for IA-SSD
+            # if sa_ins_preds[i].__len__() == 0:
+            #     continue
+            sa_xyz = input_dict['point_coords_list'][i]
+
+            if i == 1:
+                extend_gt_boxes = box_utils.enlarge_box3d(
+                    gt_boxes.view(-1, gt_boxes.shape[-1]), extra_width=[0.5, 0.5, 0.5]  # [0.2, 0.2, 0.2]
+                ).view(batch_size, -1, gt_boxes.shape[-1])
+        
+
+                sa_targets_dict = self.assign_sa_targets_simple(
+                    points=sa_xyz.view(-1, sa_xyz.shape[-1]).detach(), gt_boxes=gt_boxes,
+                    extend_gt_boxes=extend_gt_boxes,
+                    set_ignore_flag=True, use_ex_gt_assign=False
+                )
+            if i >= 2:
+                # if False:
+                extend_gt_boxes = box_utils.enlarge_box3d(
+                    gt_boxes.view(-1, gt_boxes.shape[-1]), extra_width=[0.5, 0.5, 0.5]
+                ).view(batch_size, -1, gt_boxes.shape[-1])
+                sa_targets_dict = self.assign_sa_targets_simple(
+                    points=sa_xyz.view(-1, sa_xyz.shape[-1]).detach(), gt_boxes=gt_boxes,
+                    extend_gt_boxes=extend_gt_boxes,
+                    set_ignore_flag=False, use_ex_gt_assign=True
+                )
+            # else:
+            #     extend_gt_boxes = box_utils.enlarge_box3d(
+            #         gt_boxes.view(-1, gt_boxes.shape[-1]), extra_width=[0.5, 0.5, 0.5]
+            #     ).view(batch_size, -1, gt_boxes.shape[-1])
+            #     sa_targets_dict = self.assign_stack_targets_IASSD(
+            #         points=sa_xyz.view(-1,sa_xyz.shape[-1]).detach(), gt_boxes=gt_boxes, extend_gt_boxes=extend_gt_boxes,
+            #         set_ignore_flag=False, use_ex_gt_assign= True
+            #     )
+            sa_xyz_coords.append(sa_xyz)
+            sa_ins_labels.append(sa_targets_dict['point_cls_labels'])
+            sa_gt_box_of_fg_points.append(sa_targets_dict['gt_box_of_fg_points'])
+            sa_gt_box_of_points.append(sa_targets_dict['gt_box_of_points'])
+            sa_box_idxs_labels.append(sa_targets_dict['box_idxs_labels'])
+
+        targets_dict_center['sa_ins_labels'] = sa_ins_labels
+        targets_dict_center['sa_gt_box_of_fg_points'] = sa_gt_box_of_fg_points
+        targets_dict_center['sa_xyz_coords'] = sa_xyz_coords
+        targets_dict_center['sa_gt_box_of_points'] = sa_gt_box_of_points
+        targets_dict_center['sa_box_idxs_labels'] = sa_box_idxs_labels
+
+        return targets_dict_center
+
+
 
     def forward(self, batch_dict):
         """
@@ -705,7 +1005,7 @@ class PointHeadVote(PointHeadTemplate):
         """
         batch_size = batch_dict['batch_size']
 
-        point_coords = batch_dict['point_coords']
+        point_coords = batch_dict['point_coords']   # # coords -> 带有索引的坐标
         point_features = batch_dict['point_features']
 
         batch_idx, point_coords = point_coords[:, 0], point_coords[:, 1:4]
@@ -745,12 +1045,20 @@ class PointHeadVote(PointHeadTemplate):
 
         if self.training:  # assign targets for vote loss
             extra_width = self.model_cfg.TARGET_CONFIG.get('VOTE_EXTRA_WIDTH', None)
-            targets_dict = self.assign_targets_simple(batch_dict['point_candidate_coords'],
+            targets_dict = self.assign_targets_simple(batch_dict['point_candidate_coords'],   # # candidate_coords 对应gt_truth的指定
                                                       batch_dict['gt_boxes'],
                                                       extra_width=extra_width,
                                                       set_ignore_flag=False)
             ret_dict['vote_cls_labels'] = targets_dict['point_cls_labels']  # (N)
             ret_dict['vote_reg_labels'] = targets_dict['point_reg_labels']  # (N, 3)
+
+
+            targets_dict_for_sa = self.assign_sa_targets(batch_dict)
+            ret_dict['sa_gt_box_of_fg_points'] = targets_dict_for_sa['sa_gt_box_of_fg_points']       # @
+            ret_dict['sa_xyz_coords'] = targets_dict_for_sa['sa_xyz_coords']
+
+
+
 
         _, point_features, _ = self.SA_module(
             point_coords,
@@ -758,7 +1066,7 @@ class PointHeadVote(PointHeadTemplate):
             new_xyz=vote_coords
         )
 
-        point_features = self.shared_fc_layer(point_features)
+        point_features = self.shared_fc_layer(point_features)    # # 同一个feature可以同时代表class与角度吗？？？
         point_cls_preds = self.cls_layers(point_features)
         point_reg_preds = self.reg_layers(point_features)
 
@@ -780,7 +1088,7 @@ class PointHeadVote(PointHeadTemplate):
                          'point_cls_scores': point_cls_scores})
 
         if self.training:
-            targets_dict = self.assign_targets(batch_dict)
+            targets_dict = self.assign_targets(batch_dict)   # # vote_coords 对应 gt_truth的指定
             ret_dict['point_cls_labels'] = targets_dict['point_cls_labels']
             ret_dict['point_reg_labels'] = targets_dict['point_reg_labels']
             ret_dict['point_box_labels'] = targets_dict['point_box_labels']
@@ -802,7 +1110,7 @@ class PointHeadVote(PointHeadTemplate):
                 point_cls_preds=point_cls_preds, point_box_preds=point_reg_preds
             )
             batch_dict['batch_cls_preds'] = point_cls_preds
-            batch_dict['batch_box_preds'] = point_box_preds
+            batch_dict['batch_box_preds'] = point_box_preds     # # 预测的3d盒(中心点的x,y,z坐标，长宽高，角度)
             batch_dict['cls_preds_normalized'] = False
 
         self.forward_ret_dict = ret_dict

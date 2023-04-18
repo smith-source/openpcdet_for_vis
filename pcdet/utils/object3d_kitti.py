@@ -14,7 +14,7 @@ def cls_type_to_id(cls_type):
         return -1
     return type_to_id[cls_type]
 
-
+# # [label, truncation, occlusion, alpha, box2d['bbox_left','bbox_top','bbox_right','bbox_bottom'], h, ,w, l, loc[x,y,z], ry, score]
 class Object3d(object):
     def __init__(self, line):
         label = line.strip().split(' ')
@@ -81,3 +81,8 @@ class Object3d(object):
                        self.box2d[2], self.box2d[3], self.h, self.w, self.l, self.loc[0], self.loc[1], self.loc[2],
                        self.ry)
         return kitti_str
+
+    def to_openpcdet_format(self):
+        x, y, z = self.loc[0], self.loc[1], self.loc[2]
+        openpcdet_list = [x, y, z, self.w, self.l, self.h, self.ry]
+        return openpcdet_list

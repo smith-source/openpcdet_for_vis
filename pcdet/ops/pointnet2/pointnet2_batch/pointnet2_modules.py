@@ -40,7 +40,9 @@ class _PointnetSAModuleBase(nn.Module):
             new_features = self.mlps[i](new_features)  # (B, mlp[-1], npoint, nsample)
             idx_cnt_mask = (idx_cnt > 0).float()
             idx_cnt_mask = idx_cnt_mask.unsqueeze(dim=1).unsqueeze(dim=-1)
-            new_features *= idx_cnt_mask
+            # new_features *= idx_cnt_mask
+            new_features_clone = new_features.clone()
+            new_features = new_features_clone * idx_cnt_mask
             if self.pool_method == 'max_pool':
                 new_features = F.max_pool2d(
                     new_features, kernel_size=[1, new_features.size(3)]
@@ -203,7 +205,9 @@ class _PointnetSAModuleFSBase(nn.Module):
             new_features = self.mlps[i](new_features)  # (B, mlp[-1], npoint, nsample)
             idx_cnt_mask = (idx_cnt > 0).float()  # (B, npoint)
             idx_cnt_mask = idx_cnt_mask.unsqueeze(1).unsqueeze(-1)  # (B, 1, npoint, 1)
-            new_features *= idx_cnt_mask
+            #new_features *= idx_cnt_mask
+            new_features_clone = new_features.clone()
+            new_features = new_features_clone * idx_cnt_mask
 
             if self.pool_method == 'max_pool':
                 pooled_features = F.max_pool2d(

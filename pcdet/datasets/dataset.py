@@ -135,7 +135,7 @@ class DatasetTemplate(torch_data.Dataset):
 
         data_dict = self.point_feature_encoder.forward(data_dict)
 
-        data_dict = self.data_processor.forward(
+        data_dict = self.data_processor.forward(             # # choice 16382 points from point_cloud
             data_dict=data_dict
         )
 

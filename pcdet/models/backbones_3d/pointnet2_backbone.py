@@ -1,10 +1,12 @@
+import time
+
 import torch
 import torch.nn as nn
 
 from ...ops.pointnet2.pointnet2_batch import pointnet2_modules
 from ...ops.pointnet2.pointnet2_stack import pointnet2_modules as pointnet2_modules_stack
 from ...ops.pointnet2.pointnet2_stack import pointnet2_utils as pointnet2_utils_stack
-
+import pickle                    # #
 
 class PointNet2MSG(nn.Module):
     def __init__(self, model_cfg, input_channels, **kwargs):
@@ -81,6 +83,7 @@ class PointNet2MSG(nn.Module):
         l_xyz, l_features = [xyz], [features]
         for i in range(len(self.SA_modules)):
             li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+
             l_xyz.append(li_xyz)
             l_features.append(li_features)
 
@@ -212,8 +215,25 @@ class PointNet2FSMSG(nn.Module):
 
         l_xyz, l_features, l_scores = [xyz], [features], [None]
         for i in range(len(self.SA_modules)):
-            li_xyz, li_features, li_scores = self.SA_modules[i](
-                l_xyz[i], l_features[i], scores=l_scores[i])
+            # time_start = time.time()
+            li_xyz, li_features, li_scores = self.SA_modules[i](l_xyz[i], l_features[i], scores=l_scores[i])
+            # time_end = time.time()
+            # print('%d SA time cost:' % i, time_end-time_start)
+
+
+            # if i == 2:    # #  储存不同点数的点云
+            #     bin_1, bin_2, bin_3 = l_xyz[0], l_xyz[1], l_xyz[2]                # # 16384、4096、512
+            #     with open('/home/smith/my_projects/SASA/train_pic/3dssd/16384.pickle', 'wb') as f:
+            #         pickle.dump(bin_1, f)
+            #
+            #     with open('/home/smith/my_projects/SASA/train_pic/3dssd/4096.pickle', 'wb') as f:
+            #         pickle.dump(bin_2, f)
+            #
+            #     with open('/home/smith/my_projects/SASA/train_pic/3dssd/512.pickle', 'wb') as f:
+            #         pickle.dump(bin_3, f)
+
+
+
             l_xyz.append(li_xyz)
             l_features.append(li_features)
             l_scores.append(li_scores)

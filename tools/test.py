@@ -16,6 +16,8 @@ from pcdet.datasets import build_dataloader
 from pcdet.models import build_network
 from pcdet.utils import common_utils
 
+from torchsummary import summary
+
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
@@ -208,6 +210,7 @@ def main():
         batch_size=args.batch_size,
         dist=dist_test, workers=args.workers, logger=logger, training=False
     )
+
 
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=test_set)
     with torch.no_grad():

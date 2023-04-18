@@ -1,5 +1,6 @@
 import glob
 import os
+import time
 
 import torch
 import tqdm
@@ -35,9 +36,13 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
         model.train()
         optimizer.zero_grad()
 
+        # time_start = time.time()
         loss, tb_dict, disp_dict = model_func(model, batch)
-
-        loss.backward()
+        # time_end = time.time()
+        # print("time cost:", time_end-time_start)
+         
+        loss.backward()     
+          
         clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
         optimizer.step()
 
