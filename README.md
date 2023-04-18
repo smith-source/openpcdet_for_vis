@@ -123,6 +123,12 @@ This project is released under the [Apache 2.0 license](LICENSE).
 ## Citation 
 If you find this project useful in your research, please consider cite:
 
+## Openpcdet_for_vis
+1. Add the code for changing the boxes thickness.
+2. Add the code for rejecting the 3D boxes in point-cloud to corresponding 2d images.
+3. 
+
+
 ```
 @article{chen2022sasa,
   title={SASA: Semantics-Augmented Set Abstraction for Point-based 3D Object Detection},
